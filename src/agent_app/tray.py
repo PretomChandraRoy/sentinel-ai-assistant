@@ -210,33 +210,44 @@ class JarvisApp:
     # ---- Chat handlers ----
 
     def _on_chat_send(self, message: str) -> None:
-        self.repo.save_chat_message("user", message)
-
-        # Build context
-        snap = self.system_monitor.get_latest()
-        snap_dict = snapshot_to_dict(snap) if snap else {}
-        overview = self.repo.dashboard_overview()
-        tasks = self.repo.list_tasks()[:10]
-        activity = self.repo.recent_progress(limit=10)
-        current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-        # Get AI response
-        response = self.brain.chat(
-            user_message=message,
-            system_snapshot=snap_dict,
-            task_overview=overview,
-            recent_tasks=tasks,
-            recent_activity=activity,
-            current_time=current_time,
-        )
-
-        self.repo.save_chat_message("assistant", response)
+        # Show "thinking" indicator immediately
         if self._window:
-            self._window.add_message("assistant", response)
+            self._window.add_message("system", "🧠 Thinking...")
 
-        # Speak response if voice is enabled
-        if self._voice_enabled and not self.speaker.muted:
-            self.speaker.speak(response)
+        try:
+            self.repo.save_chat_message("user", message)
+
+            # Build context
+            snap = self.system_monitor.get_latest()
+            snap_dict = snapshot_to_dict(snap) if snap else {}
+            overview = self.repo.dashboard_overview()
+            tasks = self.repo.list_tasks()[:10]
+            activity = self.repo.recent_progress(limit=10)
+            current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+            # Get AI response
+            response = self.brain.chat(
+                user_message=message,
+                system_snapshot=snap_dict,
+                task_overview=overview,
+                recent_tasks=tasks,
+                recent_activity=activity,
+                current_time=current_time,
+            )
+
+            self.repo.save_chat_message("assistant", response)
+            if self._window:
+                self._window.add_message("assistant", response)
+
+            # Speak response if voice is enabled
+            if self._voice_enabled and not self.speaker.muted:
+                self.speaker.speak(response)
+
+        except Exception as exc:
+            error_msg = f"Error: {exc}"
+            logger.error("Chat error: %s", exc, exc_info=True)
+            if self._window:
+                self._window.add_message("system", f"❌ {error_msg}")
 
     def _on_mic_click(self) -> None:
         if self.listener.is_listening:
