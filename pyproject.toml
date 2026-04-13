@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentforpc"
+version = "0.1.0"
+description = "Local-first progress tracking agent with dashboard and integrations"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi==0.115.6",
+  "uvicorn==0.32.1",
+  "jinja2==3.1.4",
+  "keyring==25.5.0",
+  "psutil==6.1.1",
+  "pygetwindow==0.0.9",
+  "pystray==0.19.5",
+  "Pillow==11.1.0",
+  "ollama==0.4.7",
+  "pyttsx3==2.98",
+  "SpeechRecognition==3.12.0",
+  "PyAudio==0.2.14",
+  "PyQt6==6.11.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

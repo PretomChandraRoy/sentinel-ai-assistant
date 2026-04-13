@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn==0.32.1
+jinja2==3.1.4
+keyring==25.5.0
+pytest==8.3.4
+httpx==0.28.1
+psutil==6.1.1
+pygetwindow==0.0.9
+pystray==0.19.5
+Pillow==11.1.0
+ollama==0.4.7
+pyttsx3==2.98
+SpeechRecognition==3.12.0
+PyAudio==0.2.14
+PyQt6==6.11.0
