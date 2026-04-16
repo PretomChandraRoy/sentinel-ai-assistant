@@ -173,11 +173,8 @@ class JarvisMainWindow(QMainWindow):
         self.signals.set_mic_listening.connect(self._do_set_mic_listening)
         self.signals.set_entry_text.connect(self._do_set_entry_text)
 
-        # Welcome
-        self._do_add_message("assistant",
-            "Hello! I'm JARVIS, your personal AI assistant.\n"
-            "Type a message or click 🎤 to speak. How can I help?"
-        )
+        # Initial message (startup briefing will follow from the tray app)
+        self._do_add_message("system", "🛡️ Sentinel AI starting up... loading your workspace.")
 
     def _build_header(self) -> QFrame:
         frame = QFrame()

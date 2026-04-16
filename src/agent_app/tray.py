@@ -10,6 +10,12 @@ from agent_app.config import AppSettings
 from agent_app.core.brain import JarvisBrain
 from agent_app.core.orchestrator import SyncOrchestrator
 from agent_app.core.retry_queue import RetryQueueService
+from agent_app.core.session_manager import (
+    build_startup_briefing,
+    build_voice_briefing,
+    capture_open_apps,
+    restore_apps,
+)
 from agent_app.core.sync import SyncService
 from agent_app.db.repository import Repository
 from agent_app.integrations.git import GitAdapter
@@ -96,6 +102,10 @@ class JarvisApp:
         # Status update thread
         self._status_stop = threading.Event()
 
+        # Proactive check-in timer
+        self._checkin_stop = threading.Event()
+        self._checkin_interval = 1800  # 30 minutes
+
     def run(self) -> None:
         """Start all services and run PyQt6 on the main thread."""
         logger.info("Starting JARVIS...")
@@ -111,6 +121,10 @@ class JarvisApp:
         # Start status bar updates in background
         status_thread = threading.Thread(target=self._status_loop, daemon=True, name="status-update")
         status_thread.start()
+
+        # Start session restore + briefing in background
+        startup_thread = threading.Thread(target=self._startup_resume, daemon=True, name="startup-resume")
+        startup_thread.start()
 
         # Run PyQt6 on the MAIN thread (this is required by Qt)
         self._run_qt_main()
@@ -148,6 +162,10 @@ class JarvisApp:
                         lambda item: "🔇 Mute Voice" if not self.speaker.muted else "🔊 Unmute Voice",
                         self._toggle_voice,
                     ),
+                    pystray.MenuItem(
+                        lambda item: "⏹️ Stop Listening" if self.listener.is_continuous else "🎙️ Start Listening",
+                        self._toggle_continuous_listen,
+                    ),
                 ),
             ),
             pystray.Menu.SEPARATOR,
@@ -161,6 +179,8 @@ class JarvisApp:
 
     def _cleanup(self) -> None:
         self._status_stop.set()
+        self._checkin_stop.set()
+        self.listener.stop_continuous()
         self.system_monitor.stop()
         self.orchestrator.stop()
         if self._tray_icon:
@@ -193,8 +213,32 @@ class JarvisApp:
         state = "muted" if muted else "unmuted"
         if self._window:
             self._window.add_message("system", f"Voice {state}.")
+        if not muted:
+            self.speaker.speak(f"Voice {state}.")
+
+    def _toggle_continuous_listen(self, icon: Any = None, item: Any = None) -> None:
+        """Toggle continuous voice listening on/off."""
+        if self.listener.is_continuous:
+            self.listener.stop_continuous()
+            if self._window:
+                self._window.add_message("system", "🎙️ Continuous listening stopped.")
+            self.speaker.speak("Listening paused. Click the mic or say my name to talk.")
+        else:
+            self.listener.start_continuous()
+            if self._window:
+                self._window.add_message("system", "🎙️ Continuous listening active — just speak!")
+            self.speaker.speak("I'm all ears. Just talk to me anytime.")
 
     def _quit(self, icon: Any = None, item: Any = None) -> None:
+        # Capture current apps for next session restore
+        try:
+            open_apps = capture_open_apps()
+            if open_apps:
+                self.repo.save_work_session(open_apps)
+                logger.info("Saved work session with %d apps.", len(open_apps))
+        except Exception as exc:
+            logger.warning("Failed to save work session: %s", exc)
+
         self.repo.create_daily_snapshot()
         if self._window:
             try:
@@ -239,7 +283,7 @@ class JarvisApp:
             if self._window:
                 self._window.add_message("assistant", response)
 
-            # Speak response if voice is enabled
+            # Speak response aloud (voice-first)
             if self._voice_enabled and not self.speaker.muted:
                 self.speaker.speak(response)
 
@@ -248,6 +292,8 @@ class JarvisApp:
             logger.error("Chat error: %s", exc, exc_info=True)
             if self._window:
                 self._window.add_message("system", f"❌ {error_msg}")
+            if self._voice_enabled and not self.speaker.muted:
+                self.speaker.speak("Sorry, I encountered an error. Please try again.")
 
     def _on_mic_click(self) -> None:
         if self.listener.is_listening:
@@ -271,6 +317,134 @@ class JarvisApp:
         self.notifier.alert_handler(alert_type, message)
         if self._window:
             self._window.add_message("system", f"⚠️ {message}")
+
+    # ---- Startup resume: restore apps + voice briefing ----
+
+    def _startup_resume(self) -> None:
+        """Background thread: restore session, speak briefing, start listening."""
+        import time
+        # Give the Qt window a moment to initialize
+        time.sleep(2)
+
+        try:
+            # 1. Load briefing data from DB
+            briefing_data = self.repo.get_startup_briefing()
+
+            # 2. Build and display the visual briefing in chat
+            briefing_msg = build_startup_briefing(briefing_data)
+            if self._window:
+                self._window.add_message("assistant", briefing_msg)
+
+            # 3. Speak the briefing aloud (voice-first!)
+            if self._voice_enabled and not self.speaker.muted:
+                voice_msg = build_voice_briefing(briefing_data)
+                self.speaker.speak_and_wait(voice_msg)
+
+            # 4. Restore apps from last session
+            last_session = briefing_data.get("last_session", [])
+            if last_session:
+                if self._window:
+                    self._window.add_message("system", "🖥️ Restoring your workspace...")
+                results = restore_apps(last_session)
+
+                launched = [r["app"] for r in results if r["status"] == "launched"]
+                already = [r["app"] for r in results if r["status"] == "already_running"]
+                failed = [r["app"] for r in results if r["status"] == "failed"]
+
+                status_lines = []
+                if launched:
+                    status_lines.append(f"✅ Launched: {', '.join(launched)}")
+                if already:
+                    status_lines.append(f"↩️ Already open: {', '.join(already)}")
+                if failed:
+                    status_lines.append(f"❌ Could not open: {', '.join(failed)}")
+
+                if status_lines and self._window:
+                    self._window.add_message("system", "\n".join(status_lines))
+
+            # 5. Send a welcome toast notification
+            overview = briefing_data.get("overview", {})
+            pending = overview.get("todo", 0) + overview.get("in_progress", 0)
+            overdue_count = len(briefing_data.get("overdue", []))
+            toast_msg = f"You have {pending} pending task(s)."
+            if overdue_count:
+                toast_msg += f" ⚠️ {overdue_count} overdue!"
+            self.notifier.notify("🛡️ Sentinel — Welcome Back!", toast_msg)
+
+            # 6. Start continuous listening (voice-first mode)
+            if self._voice_enabled:
+                time.sleep(1)
+                self.listener.start_continuous()
+                if self._window:
+                    self._window.add_message("system", "🎙️ Voice active — just speak to me anytime.")
+
+            # 7. Start proactive check-in timer
+            checkin_thread = threading.Thread(
+                target=self._proactive_checkin_loop, daemon=True, name="proactive-checkin"
+            )
+            checkin_thread.start()
+
+        except Exception as exc:
+            logger.error("Startup resume failed: %s", exc, exc_info=True)
+            if self._window:
+                self._window.add_message("system", "⚠️ Could not load startup briefing.")
+
+    # ---- Proactive check-ins (AI asks the user) ----
+
+    def _proactive_checkin_loop(self) -> None:
+        """Periodically check on the user and offer help proactively."""
+        while not self._checkin_stop.wait(self._checkin_interval):
+            try:
+                self._do_proactive_checkin()
+            except Exception as exc:
+                logger.warning("Proactive check-in failed: %s", exc)
+
+    def _do_proactive_checkin(self) -> None:
+        """Generate a context-aware proactive message and speak it."""
+        # Build current context
+        snap = self.system_monitor.get_latest()
+        snap_dict = snapshot_to_dict(snap) if snap else {}
+        overview = self.repo.dashboard_overview()
+        tasks = self.repo.list_tasks()[:10]
+        activity = self.repo.recent_progress(limit=10)
+        current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        overdue = self.repo.get_overdue_tasks()
+        in_progress = self.repo.get_in_progress_tasks()
+
+        # Ask the AI to generate a proactive check-in
+        checkin_prompt = (
+            "You are checking in on the user proactively. Based on the context below, "
+            "generate a brief, helpful check-in message. Examples: suggest a break if "
+            "they've been working long, remind about a deadline, ask about stuck tasks, "
+            "or suggest what to work on next. Keep it under 2 sentences. Be conversational."
+        )
+
+        if overdue:
+            checkin_prompt += f"\n\nIMPORTANT: There are {len(overdue)} overdue tasks! Mention this."
+        if in_progress:
+            titles = [t.get('title', '') for t in in_progress[:3]]
+            checkin_prompt += f"\n\nUser is working on: {', '.join(titles)}"
+
+        try:
+            response = self.brain.chat(
+                user_message=checkin_prompt,
+                system_snapshot=snap_dict,
+                task_overview=overview,
+                recent_tasks=tasks,
+                recent_activity=activity,
+                current_time=current_time,
+            )
+
+            # Show in chat and speak
+            if self._window:
+                self._window.add_message("assistant", f"💬 {response}")
+            if self._voice_enabled and not self.speaker.muted:
+                self.speaker.speak(response)
+
+            self.repo.save_chat_message("assistant", f"[proactive] {response}")
+
+        except Exception as exc:
+            logger.warning("Proactive check-in AI error: %s", exc)
 
     # ---- Status bar loop ----
 

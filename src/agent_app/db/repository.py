@@ -114,8 +114,19 @@ class Repository:
                     is_read INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS work_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_data TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
+            # Migrate: add deadline column to tasks if not present
+            try:
+                conn.execute("SELECT deadline FROM tasks LIMIT 1")
+            except Exception:
+                conn.execute("ALTER TABLE tasks ADD COLUMN deadline TEXT")
         self.get_or_create_inbox_project()
     def _utc_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -415,4 +426,104 @@ class Repository:
                 "UPDATE notifications SET is_read = 1 WHERE id = ?",
                 (notification_id,),
             )
+
+    # ---- Work sessions (app restore) ----
+
+    def save_work_session(self, apps: List[Dict[str, Any]]) -> None:
+        """Save the list of open apps as a JSON work session."""
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO work_sessions (session_data, created_at) VALUES (?, ?)",
+                (json.dumps(apps), self._utc_now()),
+            )
+
+    def get_last_work_session(self) -> List[Dict[str, Any]]:
+        """Retrieve the most recent work session (list of apps)."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT session_data FROM work_sessions ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return []
+        try:
+            return json.loads(row["session_data"])
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    # ---- Deadline support ----
+
+    def create_task_with_deadline(
+        self, title: str, project_id: Optional[int] = None, deadline: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a task with an optional deadline (ISO date string, e.g. 2026-04-20)."""
+        target_project = project_id if project_id is not None else self.get_or_create_inbox_project()
+        now = self._utc_now()
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO tasks (project_id, title, status, deadline, created_at, updated_at)
+                VALUES (?, ?, 'todo', ?, ?, ?)
+                """,
+                (target_project, title, deadline, now, now),
+            )
+            task_id = int(cursor.lastrowid)
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else {}
+
+    def update_task_deadline(self, task_id: int, deadline: Optional[str]) -> bool:
+        """Set or clear a deadline on an existing task."""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET deadline = ?, updated_at = ? WHERE id = ?",
+                (deadline, self._utc_now(), task_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_tasks_with_deadlines(self, days_ahead: int = 7) -> List[Dict[str, Any]]:
+        """Return tasks with deadlines within the next N days, ordered by urgency."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tasks
+                WHERE deadline IS NOT NULL
+                  AND status != 'done'
+                  AND date(deadline) <= date('now', '+' || ? || ' days')
+                ORDER BY deadline ASC
+                """,
+                (days_ahead,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_overdue_tasks(self) -> List[Dict[str, Any]]:
+        """Return tasks whose deadline has passed and are not done."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tasks
+                WHERE deadline IS NOT NULL
+                  AND status != 'done'
+                  AND date(deadline) < date('now')
+                ORDER BY deadline ASC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_in_progress_tasks(self) -> List[Dict[str, Any]]:
+        """Return all tasks currently in progress."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE status = 'in_progress' ORDER BY updated_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_startup_briefing(self) -> Dict[str, Any]:
+        """Build a comprehensive startup briefing dict."""
+        return {
+            "in_progress": self.get_in_progress_tasks(),
+            "overdue": self.get_overdue_tasks(),
+            "upcoming_deadlines": self.get_tasks_with_deadlines(days_ahead=7),
+            "overview": self.dashboard_overview(),
+            "unread_notifications": self.get_unread_notifications(limit=10),
+            "last_session": self.get_last_work_session(),
+        }
 

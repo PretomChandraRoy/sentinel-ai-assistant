@@ -17,7 +17,7 @@ def test_build_system_prompt_includes_context() -> None:
         recent_activity=[{"source": "git", "content": "committed feature X"}],
         current_time="2026-04-14 00:00 UTC",
     )
-    assert "JARVIS" in prompt
+    assert "Sentinel" in prompt
     assert "42" in prompt  # CPU
     assert "55" in prompt  # RAM
     assert "VS Code" in prompt

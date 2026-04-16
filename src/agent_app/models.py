@@ -6,6 +6,7 @@ VALID_STATUSES = {"todo", "in_progress", "done"}
 class TaskCreate:
     title: str
     project_id: Optional[int] = None
+    deadline: Optional[str] = None  # ISO date, e.g. "2026-04-20"
 @dataclass(slots=True)
 class TaskStatusUpdate:
     status: str

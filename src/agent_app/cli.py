@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_task = sub.add_parser("create-task")
     create_task.add_argument("title")
     create_task.add_argument("--project-id", type=int)
+    create_task.add_argument("--deadline", type=str, help="Due date in YYYY-MM-DD format")
     list_tasks = sub.add_parser("list-tasks")
     list_tasks.add_argument("--project-id", type=int)
     update_status = sub.add_parser("set-status")
@@ -40,7 +41,9 @@ def run() -> None:
         print(json.dumps({"ok": True, "db_path": settings.db_path}))
         return
     if args.command == "create-task":
-        task = repo.create_task(title=args.title, project_id=args.project_id)
+        task = repo.create_task_with_deadline(
+            title=args.title, project_id=args.project_id, deadline=args.deadline
+        )
         print(json.dumps(task, indent=2))
         return
     if args.command == "list-tasks":

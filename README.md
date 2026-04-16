@@ -22,11 +22,15 @@ Chat · Voice · System Monitoring · Smart Notifications · Task Tracking
 
 | Feature | Description |
 |---|---|
+| 🗣️ **Voice-First Assistant** | Continuous listening — just speak, Sentinel responds aloud. No buttons needed |
 | 🤖 **AI Chat** | Context-aware assistant powered by local Ollama LLM — knows your tasks, system state, and activity |
 | 🖥️ **System Monitor** | Real-time CPU, RAM, disk, battery, and active window tracking |
-| 🎤 **Voice Interaction** | Push-to-talk mic input + text-to-speech responses |
 | 🔔 **Smart Alerts** | Proactive notifications for low battery, high CPU/RAM, and stuck tasks |
-| 📋 **Task Tracking** | Full task lifecycle (todo → in_progress → done) with project organization |
+| 💬 **Proactive Check-ins** | AI asks you questions — suggests breaks, reminds deadlines, offers help every 30 min |
+| 📋 **Task Tracking** | Full task lifecycle with deadlines, overdue alerts, and project organization |
+| 🔄 **Session Restore** | On launch, reopens apps you had running last time + shows what you were working on |
+| ⏰ **Deadline Tracking** | Set due dates on tasks — overdue warnings, upcoming deadline briefings |
+| 🌅 **Startup Briefing** | Spoken welcome with task summary, deadlines, and workspace restoration |
 | 🔄 **Integrations** | Auto-sync from Git commits, Jira issues, file changes, and browser tabs |
 | 🌐 **Web Dashboard** | HTML dashboard + REST API for remote access |
 | 🔒 **Privacy-First** | 100% local — SQLite storage, no data leaves your machine |
@@ -138,8 +142,10 @@ src/agent_app/
 | `/api/system/status` | GET | Real-time system stats |
 | `/api/chat/history` | GET | Conversation history |
 | `/api/notifications` | GET | Unread notifications |
-| `/api/tasks` | GET/POST | List or create tasks |
+| `/api/tasks` | GET/POST | List or create tasks (supports `deadline` field) |
 | `/api/tasks/{id}/status` | POST | Update task status |
+| `/api/tasks/{id}/deadline` | POST | Set or clear a task deadline |
+| `/api/tasks/upcoming` | GET | Tasks with deadlines in the next N days + overdue |
 | `/api/summary` | GET | Dashboard summary |
 | `/api/sync/trigger` | POST | Trigger manual sync |
 | `/dashboard` | GET | Web dashboard (HTML) |
@@ -147,9 +153,10 @@ src/agent_app/
 ## ⌨️ CLI Commands
 
 ```powershell
-python -m agent_app.cli jarvis          # Launch Sentinel (system tray)
+python -m agent_app.cli jarvis          # Launch Sentinel (voice-first mode)
 python -m agent_app.cli init-db         # Initialize database
 python -m agent_app.cli create-task "Fix login bug"
+python -m agent_app.cli create-task "Deploy v2" --deadline 2026-04-20
 python -m agent_app.cli list-tasks
 python -m agent_app.cli set-status 1 done
 python -m agent_app.cli sync-once       # One-time sync from all sources
@@ -189,11 +196,15 @@ python -m pytest tests -v
 - [x] Local AI brain (Ollama)
 - [x] System monitoring & proactive alerts
 - [x] Voice interaction (STT + TTS)
+- [x] Continuous voice listening (voice-first mode)
 - [x] Task tracking with Jira sync
+- [x] Deadline tracking & overdue alerts
+- [x] Session restore (reopen apps on launch)
+- [x] Startup briefing (spoken + visual)
+- [x] Proactive AI check-ins (asks questions)
+- [x] App launch & control
 - [ ] Screen content awareness
-- [ ] App launch & control
 - [ ] Clipboard monitoring
-- [ ] Scheduled reminders & smart suggestions
 - [ ] Calendar integration
 - [ ] Learning user patterns over time
 

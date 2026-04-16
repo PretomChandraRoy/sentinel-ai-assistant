@@ -21,6 +21,7 @@ from agent_app.models import TaskStatusUpdate
 class TaskCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     project_id: Optional[int] = None
+    deadline: Optional[str] = None  # ISO date, e.g. "2026-04-20"
 class TaskStatusRequest(BaseModel):
     status: str
 class BrowserConsentRequest(BaseModel):
@@ -92,7 +93,9 @@ def create_app(settings: Optional[AppSettings] = None) -> FastAPI:
         )
     @app.post("/api/tasks")
     def create_task(payload: TaskCreateRequest) -> dict:
-        return repo.create_task(title=payload.title, project_id=payload.project_id)
+        return repo.create_task_with_deadline(
+            title=payload.title, project_id=payload.project_id, deadline=payload.deadline
+        )
     @app.get("/api/tasks")
     def list_tasks(
         project_id: Optional[int] = None,
@@ -147,6 +150,24 @@ def create_app(settings: Optional[AppSettings] = None) -> FastAPI:
         if not linked:
             raise HTTPException(status_code=404, detail="Task not found")
         return {"linked": True, "task_id": task_id, "issue_key": payload.issue_key.strip()}
+
+    # ---- Deadline & upcoming tasks ----
+
+    @app.get("/api/tasks/upcoming")
+    def upcoming_tasks(days: int = 7) -> dict:
+        tasks = repo.get_tasks_with_deadlines(days_ahead=days)
+        overdue = repo.get_overdue_tasks()
+        return {"upcoming": tasks, "overdue": overdue}
+
+    class DeadlineRequest(BaseModel):
+        deadline: Optional[str] = None
+
+    @app.post("/api/tasks/{task_id}/deadline")
+    def set_task_deadline(task_id: int, payload: DeadlineRequest) -> dict:
+        updated = repo.update_task_deadline(task_id=task_id, deadline=payload.deadline)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"updated": True, "task_id": task_id, "deadline": payload.deadline}
 
     # ---- JARVIS API endpoints ----
 
