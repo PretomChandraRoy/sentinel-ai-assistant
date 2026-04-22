@@ -33,6 +33,9 @@ Total: {total_tasks} | Todo: {todo_tasks} | In Progress: {in_progress_tasks} | D
 == User Patterns & Habits ==
 {user_patterns}
 
+== Long-Term Memory (past conversations & events) ==
+{relevant_memories}
+
 Guidelines:
 - You are a VOICE assistant. Keep responses SHORT (1-3 sentences) unless asked for detail.
 - Speak naturally — no markdown, no bullet points, no emojis in responses. Write like you're talking.
@@ -52,7 +55,11 @@ Guidelines:
   - "Which task would you like to focus on first?"
 - When the user mentions work, tasks, or deadlines, connect it to their actual task list.
 - If the user says something like "create task", "new task", "add task", extract the title and confirm.
-- If asked about system status, mention specific numbers from the data above.
+- You REMEMBER past conversations and events from the Long-Term Memory section. Use this to:
+  - Reference things the user mentioned days or weeks ago
+  - Track ongoing projects and their progress over time
+  - Never ask the user to repeat information you already have
+  - Say things like "Last week you mentioned..." or "You previously said..."
 - Treat the user respectfully — address them as "sir" occasionally for the assistant feel.
 - You can track what they're working on by looking at the active window and screen content.
 """
@@ -80,6 +87,7 @@ class JarvisBrain:
         current_time: str = "",
         screen_context: str = "",
         user_patterns: str = "",
+        relevant_memories: str = "",
     ) -> str:
         snap = system_snapshot or {}
         overview = task_overview or {"todo": 0, "in_progress": 0, "done": 0, "total": 0}
@@ -122,6 +130,7 @@ class JarvisBrain:
             recent_tasks=task_lines,
             recent_activity=activity_lines,
             user_patterns=user_patterns or "No patterns recorded yet.",
+            relevant_memories=relevant_memories or "No memories yet. This is a fresh start.",
         )
 
     def chat(
@@ -134,6 +143,7 @@ class JarvisBrain:
         current_time: str = "",
         screen_context: str = "",
         user_patterns: str = "",
+        relevant_memories: str = "",
     ) -> str:
         ollama_mod = self._try_import_ollama()
         if ollama_mod is None:
@@ -147,6 +157,7 @@ class JarvisBrain:
             current_time=current_time,
             screen_context=screen_context,
             user_patterns=user_patterns,
+            relevant_memories=relevant_memories,
         )
 
         self._history.append({"role": "user", "content": user_message})

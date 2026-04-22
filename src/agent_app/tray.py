@@ -1,6 +1,7 @@
 from __future__ import annotations
 import io
 import logging
+import os
 import sys
 import threading
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from agent_app.config import AppSettings
 from agent_app.core.brain import JarvisBrain
+from agent_app.core.memory import MemoryManager
 from agent_app.core.orchestrator import SyncOrchestrator
 from agent_app.core.retry_queue import RetryQueueService
 from agent_app.core.pattern_tracker import PatternTracker
@@ -82,6 +84,14 @@ class JarvisApp:
 
         # AI brain
         self.brain = JarvisBrain()
+
+        # Long-term memory (RAG)
+        memory_dir = os.path.join(
+            os.path.dirname(self.settings.db_path) or ".",
+            ".sentinel_memory",
+        )
+        self.memory = MemoryManager(persist_dir=memory_dir)
+        self.memory.init()
 
         # Notifier
         self.notifier = Notifier()
@@ -292,6 +302,11 @@ class JarvisApp:
             screen_text = self.screen_reader.get_context_text(max_chars=2000)
             pattern_summary = self.pattern_tracker.get_pattern_summary()
 
+            # Recall relevant memories
+            memories_text = ""
+            if self.memory.is_ready:
+                memories_text = self.memory.recall_formatted(message, n_results=5)
+
             # Get AI response
             response = self.brain.chat(
                 user_message=message,
@@ -302,7 +317,13 @@ class JarvisApp:
                 current_time=current_time,
                 screen_context=screen_text,
                 user_patterns=pattern_summary,
+                relevant_memories=memories_text,
             )
+
+            # Store conversation in long-term memory
+            if self.memory.is_ready:
+                self.memory.store_conversation("user", message)
+                self.memory.store_conversation("assistant", response)
 
             self.repo.save_chat_message("assistant", response)
             if self._window:
@@ -452,6 +473,11 @@ class JarvisApp:
             titles = [t.get('title', '') for t in in_progress[:3]]
             checkin_prompt += f"\n\nUser is working on: {', '.join(titles)}"
 
+        # Recall relevant memories for check-in context
+        memories_text = ""
+        if self.memory.is_ready:
+            memories_text = self.memory.recall_formatted(checkin_prompt, n_results=3)
+
         try:
             response = self.brain.chat(
                 user_message=checkin_prompt,
@@ -462,6 +488,7 @@ class JarvisApp:
                 current_time=current_time,
                 screen_context=screen_text,
                 user_patterns=pattern_summary,
+                relevant_memories=memories_text,
             )
 
             # Show in chat and speak

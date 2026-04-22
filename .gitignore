@@ -13,4 +13,5 @@ __pycache__/
 .idea/
 coverage.xml
 htmlcov/
-
+.sentinel_memory/
+_test_memory_tmp/

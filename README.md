@@ -204,6 +204,7 @@ python -m pytest tests -v
 - [x] Proactive AI check-ins (asks questions)
 - [x] App launch & control
 - [x] Screen content awareness (OCR via Windows native engine)
+- [x] AI Memory / RAG (ChromaDB — remembers everything across sessions)
 - [ ] Clipboard monitoring
 - [ ] Calendar integration
 - [x] Learning user patterns over time (app usage, productive hours, focus score)
