@@ -203,10 +203,10 @@ python -m pytest tests -v
 - [x] Startup briefing (spoken + visual)
 - [x] Proactive AI check-ins (asks questions)
 - [x] App launch & control
-- [ ] Screen content awareness
+- [x] Screen content awareness (OCR via Windows native engine)
 - [ ] Clipboard monitoring
 - [ ] Calendar integration
-- [ ] Learning user patterns over time
+- [x] Learning user patterns over time (app usage, productive hours, focus score)
 
 ## 📄 License
 

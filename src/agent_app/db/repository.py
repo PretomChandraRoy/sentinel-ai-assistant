@@ -120,6 +120,20 @@ class Repository:
                     session_data TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS activity_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    event_data TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS user_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_type TEXT NOT NULL,
+                    pattern_data TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL
+                );
                 """
             )
             # Migrate: add deadline column to tasks if not present
@@ -526,4 +540,58 @@ class Repository:
             "unread_notifications": self.get_unread_notifications(limit=10),
             "last_session": self.get_last_work_session(),
         }
+
+    # ---- Activity log (pattern learning) ----
+
+    def log_activity(self, event_type: str, event_data: Dict[str, Any]) -> None:
+        """Log a user activity event for pattern analysis."""
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO activity_log (event_type, event_data, created_at) VALUES (?, ?, ?)",
+                (event_type, json.dumps(event_data), self._utc_now()),
+            )
+
+    def get_recent_activity_events(self, hours_back: int = 24) -> List[Dict[str, Any]]:
+        """Return activity events from the last N hours."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM activity_log
+                WHERE created_at >= datetime('now', '-' || ? || ' hours')
+                ORDER BY created_at ASC
+                """,
+                (hours_back,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_pattern(self, pattern_type: str, pattern_data: Dict[str, Any]) -> None:
+        """Save or update a pattern insight."""
+        with self.connection() as conn:
+            # Keep only the latest per pattern_type (replace old)
+            conn.execute(
+                "DELETE FROM user_patterns WHERE pattern_type = ?",
+                (pattern_type,),
+            )
+            conn.execute(
+                "INSERT INTO user_patterns (pattern_type, pattern_data, recorded_at) VALUES (?, ?, ?)",
+                (pattern_type, json.dumps(pattern_data), self._utc_now()),
+            )
+
+    def get_patterns(self, pattern_type: str, limit: int = 1) -> List[Dict[str, Any]]:
+        """Retrieve stored pattern insights by type."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM user_patterns WHERE pattern_type = ? ORDER BY recorded_at DESC LIMIT ?",
+                (pattern_type, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def cleanup_old_activity(self, days_to_keep: int = 30) -> int:
+        """Remove activity events older than N days. Returns count deleted."""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM activity_log WHERE created_at < datetime('now', '-' || ? || ' days')",
+                (days_to_keep,),
+            )
+            return cursor.rowcount
 

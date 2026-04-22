@@ -18,6 +18,9 @@ CPU: {cpu_percent}% | RAM: {ram_percent}% ({ram_used_gb}GB / {ram_total_gb}GB)
 Disk Free: {disk_free_gb}GB | Battery: {battery_status}
 Active Window: {active_window}
 
+== Screen Content (OCR) ==
+{screen_context}
+
 == Tasks Overview ==
 Total: {total_tasks} | Todo: {todo_tasks} | In Progress: {in_progress_tasks} | Done: {done_tasks}
 
@@ -27,10 +30,21 @@ Total: {total_tasks} | Todo: {todo_tasks} | In Progress: {in_progress_tasks} | D
 == Recent Activity ==
 {recent_activity}
 
+== User Patterns & Habits ==
+{user_patterns}
+
 Guidelines:
 - You are a VOICE assistant. Keep responses SHORT (1-3 sentences) unless asked for detail.
 - Speak naturally — no markdown, no bullet points, no emojis in responses. Write like you're talking.
 - Be proactive: suggest what to work on, remind about deadlines, recommend breaks.
+- You can SEE what's on the user's screen via the Screen Content section. Use this to:
+  - Answer "what am I looking at?" or "help me with this"
+  - Provide context-aware help (if they're on a code editor, help with code; if on a browser, help with research)
+  - Notice if they seem stuck or reading error messages
+- You KNOW the user's habits from the User Patterns section. Use this to:
+  - Suggest breaks if they've been working too long
+  - Recommend peak productivity hours for important tasks
+  - Notice if they're more distracted than usual (low focus score)
 - ASK QUESTIONS to help the user. Examples:
   - "Would you like me to mark that task as done?"
   - "You've been at it for a while. Want me to set a timer for a break?"
@@ -40,7 +54,7 @@ Guidelines:
 - If the user says something like "create task", "new task", "add task", extract the title and confirm.
 - If asked about system status, mention specific numbers from the data above.
 - Treat the user respectfully — address them as "sir" occasionally for the assistant feel.
-- You can track what they're working on by looking at the active window and recent activity.
+- You can track what they're working on by looking at the active window and screen content.
 """
 
 
@@ -64,6 +78,8 @@ class JarvisBrain:
         recent_tasks: Optional[List[Dict[str, Any]]] = None,
         recent_activity: Optional[List[Dict[str, Any]]] = None,
         current_time: str = "",
+        screen_context: str = "",
+        user_patterns: str = "",
     ) -> str:
         snap = system_snapshot or {}
         overview = task_overview or {"todo": 0, "in_progress": 0, "done": 0, "total": 0}
@@ -98,12 +114,14 @@ class JarvisBrain:
             disk_free_gb=snap.get("disk_free_gb", "?"),
             battery_status=battery_status,
             active_window=snap.get("active_window", "unknown"),
+            screen_context=screen_context or "(No screen capture available)",
             total_tasks=overview.get("total", 0),
             todo_tasks=overview.get("todo", 0),
             in_progress_tasks=overview.get("in_progress", 0),
             done_tasks=overview.get("done", 0),
             recent_tasks=task_lines,
             recent_activity=activity_lines,
+            user_patterns=user_patterns or "No patterns recorded yet.",
         )
 
     def chat(
@@ -114,6 +132,8 @@ class JarvisBrain:
         recent_tasks: Optional[List[Dict[str, Any]]] = None,
         recent_activity: Optional[List[Dict[str, Any]]] = None,
         current_time: str = "",
+        screen_context: str = "",
+        user_patterns: str = "",
     ) -> str:
         ollama_mod = self._try_import_ollama()
         if ollama_mod is None:
@@ -125,6 +145,8 @@ class JarvisBrain:
             recent_tasks=recent_tasks,
             recent_activity=recent_activity,
             current_time=current_time,
+            screen_context=screen_context,
+            user_patterns=user_patterns,
         )
 
         self._history.append({"role": "user", "content": user_message})
@@ -144,7 +166,7 @@ class JarvisBrain:
                 content = (
                     "I can't reach the Ollama server. Please make sure Ollama is "
                     "running:\n\n1. Install from https://ollama.com\n"
-                    "2. Run: `ollama serve`\n"
+                    f"2. Run: `ollama serve`\n"
                     f"3. Pull a model: `ollama pull {self.model}`"
                 )
             else:

@@ -10,6 +10,7 @@ from agent_app.config import AppSettings
 from agent_app.core.brain import JarvisBrain
 from agent_app.core.orchestrator import SyncOrchestrator
 from agent_app.core.retry_queue import RetryQueueService
+from agent_app.core.pattern_tracker import PatternTracker
 from agent_app.core.session_manager import (
     build_startup_briefing,
     build_voice_briefing,
@@ -23,6 +24,7 @@ from agent_app.integrations.github_issues import GitHubIssuesAdapter
 from agent_app.integrations.jira import JiraAdapter
 from agent_app.integrations.workfiles import WorkfilesAdapter
 from agent_app.monitors.notifier import Notifier
+from agent_app.monitors.screen_reader import ScreenReader
 from agent_app.monitors.system_monitor import (
     SystemMonitor,
     capture_snapshot,
@@ -90,6 +92,18 @@ class JarvisApp:
             on_alert=self._on_system_alert,
         )
 
+        # Screen reader (OCR awareness)
+        self.screen_reader = ScreenReader(interval_seconds=60, buffer_size=5)
+
+        # Pattern tracker (learns user habits)
+        self.pattern_tracker = PatternTracker(
+            log_fn=self.repo.log_activity,
+            query_fn=self.repo.get_recent_activity_events,
+            save_pattern_fn=self.repo.save_pattern,
+            get_patterns_fn=self.repo.get_patterns,
+            analysis_interval=600,
+        )
+
         # Voice
         self.speaker = VoiceSpeaker()
         self.listener = VoiceListener(on_speech=self._on_speech)
@@ -106,6 +120,9 @@ class JarvisApp:
         self._checkin_stop = threading.Event()
         self._checkin_interval = 1800  # 30 minutes
 
+        # Track last active window for pattern learning
+        self._last_tracked_window = ""
+
     def run(self) -> None:
         """Start all services and run PyQt6 on the main thread."""
         logger.info("Starting JARVIS...")
@@ -113,6 +130,8 @@ class JarvisApp:
         # Start background services
         self.orchestrator.start()
         self.system_monitor.start()
+        self.screen_reader.start()
+        self.pattern_tracker.start()
 
         # Start tray icon in background thread
         tray_thread = threading.Thread(target=self._run_tray, daemon=True, name="tray-icon")
@@ -181,6 +200,8 @@ class JarvisApp:
         self._status_stop.set()
         self._checkin_stop.set()
         self.listener.stop_continuous()
+        self.screen_reader.stop()
+        self.pattern_tracker.stop()
         self.system_monitor.stop()
         self.orchestrator.stop()
         if self._tray_icon:
@@ -268,6 +289,8 @@ class JarvisApp:
             tasks = self.repo.list_tasks()[:10]
             activity = self.repo.recent_progress(limit=10)
             current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            screen_text = self.screen_reader.get_context_text(max_chars=2000)
+            pattern_summary = self.pattern_tracker.get_pattern_summary()
 
             # Get AI response
             response = self.brain.chat(
@@ -277,6 +300,8 @@ class JarvisApp:
                 recent_tasks=tasks,
                 recent_activity=activity,
                 current_time=current_time,
+                screen_context=screen_text,
+                user_patterns=pattern_summary,
             )
 
             self.repo.save_chat_message("assistant", response)
@@ -408,6 +433,8 @@ class JarvisApp:
         tasks = self.repo.list_tasks()[:10]
         activity = self.repo.recent_progress(limit=10)
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        screen_text = self.screen_reader.get_context_text(max_chars=1000)
+        pattern_summary = self.pattern_tracker.get_pattern_summary()
         overdue = self.repo.get_overdue_tasks()
         in_progress = self.repo.get_in_progress_tasks()
 
@@ -433,6 +460,8 @@ class JarvisApp:
                 recent_tasks=tasks,
                 recent_activity=activity,
                 current_time=current_time,
+                screen_context=screen_text,
+                user_patterns=pattern_summary,
             )
 
             # Show in chat and speak
@@ -457,6 +486,15 @@ class JarvisApp:
                     ram=snap.ram_percent,
                     battery=snap.battery_percent,
                 )
+
+            # Track window changes for pattern learning
+            if snap and snap.active_window:
+                if snap.active_window != self._last_tracked_window:
+                    self._last_tracked_window = snap.active_window
+                    try:
+                        self.pattern_tracker.on_window_change(snap.active_window)
+                    except Exception:
+                        pass
 
 
 def launch_jarvis(settings: Optional[AppSettings] = None) -> None:
